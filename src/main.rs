@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+#![cfg_attr(not(test), windows_subsystem = "windows")]
 
 use eframe::egui;
 use rfd::FileDialog;
@@ -8,7 +8,7 @@ use std::thread;
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([620.0, 260.0])
+            .with_inner_size([620.0, 300.0])
             .with_resizable(false)
             .with_title("SRT Translator"),
         ..Default::default()
@@ -338,4 +338,173 @@ fn run_translation(
     }
 
     Ok(())
+}
+
+// ── Tests ───────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── helpers ────────────────────────────────────────────────────────────
+
+    fn make_sub(index: &str, ts: &str, text: &str) -> Sub {
+        Sub {
+            index: index.to_string(),
+            timestamp: ts.to_string(),
+            text: text.to_string(),
+        }
+    }
+
+    // ── parse_srt ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn parse_single_entry() {
+        let raw = "1\n00:00:01,000 --> 00:00:02,000\nHello, world!\n\n";
+        let subs = parse_srt(raw);
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].index, "1");
+        assert_eq!(subs[0].timestamp, "00:00:01,000 --> 00:00:02,000");
+        assert_eq!(subs[0].text, "Hello, world!");
+    }
+
+    #[test]
+    fn parse_multiple_entries() {
+        let raw = concat!(
+            "1\n00:00:01,000 --> 00:00:02,000\nFirst\n\n",
+            "2\n00:00:03,000 --> 00:00:04,000\nSecond\n\n",
+        );
+        let subs = parse_srt(raw);
+        assert_eq!(subs.len(), 2);
+        assert_eq!(subs[0].text, "First");
+        assert_eq!(subs[1].text, "Second");
+    }
+
+    #[test]
+    fn parse_multiline_subtitle_text() {
+        let raw = "1\n00:00:01,000 --> 00:00:02,000\nLine one\nLine two\n\n";
+        let subs = parse_srt(raw);
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].text, "Line one\nLine two");
+    }
+
+    #[test]
+    fn parse_empty_input_returns_empty_vec() {
+        assert!(parse_srt("").is_empty());
+    }
+
+    #[test]
+    fn parse_skips_blocks_without_arrow() {
+        let raw = concat!(
+            "junk\nno arrow here\nsome text\n\n",
+            "1\n00:00:01,000 --> 00:00:02,000\nValid\n\n",
+        );
+        let subs = parse_srt(raw);
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].text, "Valid");
+    }
+
+    #[test]
+    fn parse_preserves_timestamp_exactly() {
+        let ts = "01:23:45,678 --> 01:23:47,900";
+        let raw = format!("42\n{}\nSome text\n\n", ts);
+        let subs = parse_srt(&raw);
+        assert_eq!(subs[0].timestamp, ts);
+    }
+
+    // ── compose_srt ────────────────────────────────────────────────────────
+
+    #[test]
+    fn compose_single_entry_format() {
+        let subs = vec![make_sub("1", "00:00:01,000 --> 00:00:02,000", "Hello!")];
+        assert_eq!(
+            compose_srt(&subs),
+            "1\n00:00:01,000 --> 00:00:02,000\nHello!\n\n"
+        );
+    }
+
+    #[test]
+    fn compose_preserves_multiline_text() {
+        let subs = vec![make_sub(
+            "1",
+            "00:00:01,000 --> 00:00:02,000",
+            "Line one\nLine two",
+        )];
+        assert_eq!(
+            compose_srt(&subs),
+            "1\n00:00:01,000 --> 00:00:02,000\nLine one\nLine two\n\n"
+        );
+    }
+
+    #[test]
+    fn parse_compose_roundtrip() {
+        let original = concat!(
+            "1\n00:00:01,000 --> 00:00:02,000\nHello, world!\n\n",
+            "2\n00:00:03,000 --> 00:00:04,000\nGoodbye!\n\n",
+        );
+        assert_eq!(compose_srt(&parse_srt(original)), original);
+    }
+
+    #[test]
+    fn parse_compose_roundtrip_multiline() {
+        let original = "1\n00:00:01,000 --> 00:00:02,000\n- Hello!\n- World!\n\n";
+        assert_eq!(compose_srt(&parse_srt(original)), original);
+    }
+
+    // ── translation integration tests ──────────────────────────────────────
+    //
+    // These hit the real Google Translate endpoint.
+    // Run with: cargo test -- --include-ignored
+
+    #[test]
+    #[ignore = "requires network access — run with: cargo test -- --include-ignored"]
+    fn translate_hello_world_contains_vilag() {
+        let result = call_google("Hello, world!").expect("Google Translate call failed");
+        assert!(
+            result.to_lowercase().contains("világ") || result.to_lowercase().contains("hello"),
+            "expected Hungarian translation of 'Hello, world!', got: {result:?}"
+        );
+    }
+
+    #[test]
+    #[ignore = "requires network access — run with: cargo test -- --include-ignored"]
+    fn translate_srt_hello_world_preserves_timestamp() {
+        let raw = "1\n00:00:01,000 --> 00:00:02,000\nHello, world!\n\n";
+        let mut subs = parse_srt(raw);
+
+        let texts: Vec<&str> = subs.iter().map(|s| s.text.as_str()).collect();
+        let results = translate_batch(&texts).expect("translation failed");
+        for (sub, tr) in subs.iter_mut().zip(results.iter()) {
+            if !tr.is_empty() {
+                sub.text = tr.clone();
+            }
+        }
+
+        // Timestamp and index must be untouched
+        assert_eq!(subs[0].index, "1");
+        assert_eq!(subs[0].timestamp, "00:00:01,000 --> 00:00:02,000");
+
+        // Text should be translated to Hungarian
+        let lower = subs[0].text.to_lowercase();
+        assert!(
+            lower.contains("világ") || lower.contains("hello"),
+            "expected 'világ' in translation, got: {:?}", subs[0].text
+        );
+    }
+
+    #[test]
+    #[ignore = "requires network access — run with: cargo test -- --include-ignored"]
+    fn translate_batch_multiple_lines() {
+        let texts = vec!["Hello, world!", "Goodbye!"];
+        let results = translate_batch(&texts).expect("translation failed");
+        assert_eq!(results.len(), 2, "batch result count must match input count");
+        assert!(
+            results[0].to_lowercase().contains("világ") || results[0].to_lowercase().contains("hello"),
+            "first result should be Hungarian, got: {:?}", results[0]
+        );
+        assert!(
+            !results[1].is_empty(),
+            "second result should not be empty"
+        );
+    }
 }
