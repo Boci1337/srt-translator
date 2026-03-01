@@ -8,8 +8,8 @@ use std::thread;
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([620.0, 300.0])
-            .with_resizable(false)
+            .with_inner_size([620.0, 440.0])
+            .with_resizable(true)
             .with_title("SRT Translator"),
         ..Default::default()
     };
@@ -139,25 +139,21 @@ impl eframe::App for App {
 
             ui.add_space(8.0);
             ui.separator();
-            ui.add_space(4.0);
+            ui.add_space(8.0);
 
             // ── Start button ───────────────────────────────────────────────
             let can_start = !self.running
                 && !self.input_path.is_empty()
                 && !self.output_path.is_empty();
 
-            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                if ui
-                    .add_enabled(
-                        can_start,
-                        egui::Button::new("\u{25B6}  Start Translation")
-                            .min_size(egui::vec2(200.0, 32.0)),
-                    )
-                    .clicked()
-                {
-                    self.start_translation();
-                }
-            });
+            let btn = ui.add_enabled(
+                can_start,
+                egui::Button::new("\u{25B6}  Start Translation")
+                    .min_size(egui::vec2(200.0, 32.0)),
+            );
+            if btn.clicked() {
+                self.start_translation();
+            }
         });
     }
 }
