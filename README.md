@@ -19,7 +19,7 @@ Single `.exe`, no installer, no dependencies. Just run it.
 
 ## Screenshot
 
-![SRT Translator screenshot](https://github.com/Boci1337/srt-translator/assets/screenshot.png)
+<img width="622" height="472" alt="srt-translator_FTYqyo7UPi" src="https://github.com/user-attachments/assets/5645e054-dc57-4d78-842d-4c491add9eb2" />
 
 > _Window showing input/output file pickers, a live progress bar, and the Start button._
 
