@@ -207,8 +207,13 @@ struct Sub {
 }
 
 fn parse_srt(raw: &str) -> Vec<Sub> {
+    // Strip UTF-8 BOM and normalise CRLF / bare CR line endings
+    let normalised = raw
+        .trim_start_matches('\u{FEFF}')
+        .replace("\r\n", "\n")
+        .replace('\r', "\n");
     let mut subs = Vec::new();
-    for block in raw.split("\n\n") {
+    for block in normalised.split("\n\n") {
         let block = block.trim();
         if block.is_empty() {
             continue;
@@ -382,6 +387,22 @@ mod tests {
         let subs = parse_srt(raw);
         assert_eq!(subs.len(), 1);
         assert_eq!(subs[0].text, "Line one\nLine two");
+    }
+
+    #[test]
+    fn parse_crlf_line_endings() {
+        let raw = "1\r\n00:00:01,000 --> 00:00:02,000\r\nHello, world!\r\n\r\n";
+        let subs = parse_srt(raw);
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].text, "Hello, world!");
+    }
+
+    #[test]
+    fn parse_utf8_bom_is_stripped() {
+        let raw = "\u{FEFF}1\n00:00:01,000 --> 00:00:02,000\nHello!\n\n";
+        let subs = parse_srt(raw);
+        assert_eq!(subs.len(), 1);
+        assert_eq!(subs[0].index, "1");
     }
 
     #[test]
